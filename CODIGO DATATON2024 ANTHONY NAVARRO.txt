@@ -1,0 +1,1173 @@
+# Instalación de librerías necesarias 
+%pip install pandas numpy matplotlib seaborn scikit-learn
+%pip install plotly graphviz joblib
+%pip install imbalanced-learn
+
+# Importación de librerías necesarias
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import joblib
+from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score, RandomizedSearchCV, StratifiedKFold
+from sklearn.preprocessing import StandardScaler, LabelEncoder, label_binarize, MinMaxScaler, PowerTransformer
+from sklearn.metrics import (
+    confusion_matrix, classification_report, accuracy_score, precision_score,
+    recall_score, f1_score, roc_auc_score, roc_curve, auc
+)
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.tree import DecisionTreeClassifier, export_graphviz
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.svm import SVC
+from sklearn.neural_network import MLPClassifier
+from sklearn.naive_bayes import GaussianNB, MultinomialNB, ComplementNB, BernoulliNB
+from scipy.stats import loguniform
+from imblearn.over_sampling import SMOTE
+from imblearn.under_sampling import RandomUnderSampler
+from sklearn.feature_selection import SelectKBest, f_classif, SelectFromModel, RFE
+from sklearn.impute import SimpleImputer
+from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.linear_model import LogisticRegression
+import warnings
+from sklearn.exceptions import UndefinedMetricWarning
+from matplotlib.colors import ListedColormap
+from itertools import cycle
+from datetime import datetime
+import graphviz
+from IPython.display import display, Image
+
+# Lectura del archivo Excel desde la ruta local
+ruta_archivo = r"C:\Users\thony\OneDrive\Documentos\TESIS 2\BASE DE DATOS TESIS\eventos_sismicos_0.xlsx"
+df = pd.read_excel(ruta_archivo)
+
+# Verificación de la carga correcta de los datos
+print(df.head())
+print(df.info())
+
+# Función para convertir la fecha y hora
+def convertir_fecha_hora(fecha, hora):
+    fecha_str = str(fecha)
+    hora_str = str(hora).zfill(6)
+    fecha_hora_str = f"{fecha_str[:4]}-{fecha_str[4:6]}-{fecha_str[6:]} {hora_str[:2]}:{hora_str[2:4]}:{hora_str[4:]}"
+    return datetime.strptime(fecha_hora_str, "%Y-%m-%d %H:%M:%S")
+
+# Aplicar la conversión
+df['FECHA_HORA_UTC'] = df.apply(lambda row: convertir_fecha_hora(row['FECHA_UTC'], row['HORA_UTC']), axis=1)
+
+# Eliminar las columnas originales de fecha y hora
+df = df.drop(['FECHA_UTC', 'HORA_UTC'], axis=1)
+
+print("Dimensiones originales del dataset:", df.shape)
+
+# Eliminar columnas no necesarias
+df = df.drop(['FECHA_CORTE', 'UBIGEO'], axis=1)
+
+# Verificar valores nulos
+print("\nValores nulos por columna:")
+print(df.isnull().sum())
+
+# Eliminar duplicados
+duplicados = df.duplicated()
+df = df.drop_duplicates()
+print(f"\nSe eliminaron {duplicados.sum()} registros duplicados")
+
+# Corrección de errores
+df['TIPO'] = df['TIPO'].replace({'st': 'ST'})
+df = df.rename(columns={'ANIO': 'AÑO'})
+
+# Verificar tipos de datos
+print("\nTipos de datos de las columnas:")
+print(df.dtypes)
+
+# Estadísticas descriptivas
+variables_numericas = ['FRECUENCIA_PRINCIPAL', 'DURACION', 'ENERGIA']
+print("\nEstadísticas descriptivas de variables numéricas continuas:")
+print(df[variables_numericas].describe())
+
+# Visualizaciones
+
+# Distribución de eventos sísmicos por tipo
+plt.figure(figsize=(12, 6))
+df['TIPO'].value_counts().plot(kind='bar')
+plt.title('Distribución de Eventos Sísmicos por Tipo')
+plt.xlabel('Tipo de Evento')
+plt.ylabel('Cantidad')
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.show()
+
+# Distribución de eventos por volcán
+plt.figure(figsize=(8, 6))
+df['VOLCAN'].value_counts().plot(kind='pie', autopct='%1.1f%%')
+plt.title('Distribución de Eventos por Volcán')
+plt.ylabel('')
+plt.show()
+
+# Tipo de eventos por año
+plt.figure(figsize=(14, 8))
+eventos_por_anio = df.groupby(['AÑO', 'TIPO']).size().unstack(fill_value=0)
+eventos_por_anio.plot(kind='bar', stacked=True)
+plt.title('Tipos de Eventos Sísmicos por Año')
+plt.xlabel('Año')
+plt.ylabel('Número de Eventos')
+plt.legend(title='Tipo de Evento', bbox_to_anchor=(1.05, 1), loc='upper left')
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.show()
+
+# Boxplot de la duración de los eventos por tipo
+plt.figure(figsize=(12, 6))
+sns.boxplot(x='TIPO', y='DURACION', data=df)
+plt.title('Duración de Eventos por Tipo')
+plt.xlabel('Tipo de Evento')
+plt.ylabel('Duración (segundos)')
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.show()
+
+# Scatter plot de Frecuencia vs Energía
+plt.figure(figsize=(10, 6))
+sns.scatterplot(x='FRECUENCIA_PRINCIPAL', y='ENERGIA', hue='TIPO', data=df)
+plt.title('Frecuencia vs Energía por Tipo de Evento')
+plt.xlabel('Frecuencia (Hz)')
+plt.ylabel('Energía')
+plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+plt.tight_layout()
+plt.show()
+
+# Matriz de correlación
+corr = df[variables_numericas].corr()
+plt.figure(figsize=(10, 8))
+sns.heatmap(corr, annot=True, cmap='coolwarm', linewidths=0.5)
+plt.title('Matriz de Correlación de Variables Numéricas')
+plt.tight_layout()
+plt.show()
+
+# Nuevas visualizaciones para eventos por día y hora
+# Diccionario para mapear los nombres de los días en inglés a español
+dias_semana = {
+    'Monday': 'Lunes',
+    'Tuesday': 'Martes',
+    'Wednesday': 'Miércoles',
+    'Thursday': 'Jueves',
+    'Friday': 'Viernes',
+    'Saturday': 'Sábado',
+    'Sunday': 'Domingo'
+}
+
+# Extraer día de la semana y hora
+df['DIA_SEMANA'] = df['FECHA_HORA_UTC'].dt.day_name().map(dias_semana)
+df['HORA'] = df['FECHA_HORA_UTC'].dt.hour
+
+# Crear un heatmap de eventos por día y hora
+plt.figure(figsize=(12, 8))
+evento_por_dia_hora = df.groupby(['DIA_SEMANA', 'HORA'])['TIPO'].count().unstack()
+evento_por_dia_hora = evento_por_dia_hora.reindex(['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'])
+sns.heatmap(evento_por_dia_hora, cmap='YlOrRd')
+plt.title('Distribución de Eventos Sísmicos por Día y Hora')
+plt.xlabel('Hora del Día')
+plt.ylabel('Día de la Semana')
+plt.show()
+
+# Gráfico de barras para eventos por día de la semana
+plt.figure(figsize=(10, 6))
+orden_dias = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
+df['DIA_SEMANA'].value_counts().reindex(orden_dias).plot(kind='bar')
+plt.title('Distribución de Eventos Sísmicos por Día de la Semana')
+plt.xlabel('Día de la Semana')
+plt.ylabel('Número de Eventos')
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.show()
+
+# Gráfico de líneas para eventos por hora del día
+plt.figure(figsize=(10, 6))
+df['HORA'].value_counts().sort_index().plot(kind='line', marker='o')
+plt.title('Distribución de Eventos Sísmicos por Hora del Día')
+plt.xlabel('Hora del Día')
+plt.ylabel('Número de Eventos')
+plt.xticks(range(0, 24))
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+# Visualizar el DataFrame limpio y transformado
+print("\nDataFrame limpio y transformado:")
+
+# Mostrar las primeras 5 filas
+print("Primeras 5 filas:")
+print(df.head())
+
+# Mostrar las últimas 5 filas
+print("\nÚltimas 5 filas:")
+print(df.tail())
+
+# Mostrar el total de filas y columnas
+print(f"\nTotal de filas: {df.shape[0]}")
+print(f"Total de columnas: {df.shape[1]}")
+
+# Selección de características para el modelado
+features = ['AÑO', 'FRECUENCIA_PRINCIPAL', 'DURACION', 'ENERGIA', 'VOLCAN']
+target = 'TIPO'
+
+# Crear una copia explícita del DataFrame
+X = df[features].copy()
+y = df[target].copy()
+
+# Codificación de variables categóricas
+le_volcan = LabelEncoder()
+le_tipo = LabelEncoder()
+
+# Usar .loc para asignar valores
+X.loc[:, 'VOLCAN'] = le_volcan.fit_transform(X['VOLCAN'])
+y = le_tipo.fit_transform(y)
+
+# División de datos en conjuntos de entrenamiento y prueba
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+print("Forma de los conjuntos de datos:")
+print(f"X_train: {X_train.shape}")
+print(f"X_test: {X_test.shape}")
+print(f"y_train: {y_train.shape}")
+print(f"y_test: {y_test.shape}")
+
+# Guardar los conjuntos de datos para su uso posterior
+np.save('X_train.npy', X_train)
+np.save('X_test.npy', X_test)
+np.save('y_train.npy', y_train)
+np.save('y_test.npy', y_test)
+
+# Guardar también los transformadores para su uso posterior
+joblib.dump(le_volcan, 'le_volcan.joblib')
+joblib.dump(le_tipo, 'le_tipo.joblib')
+
+print("Los conjuntos de datos y los transformadores han sido guardados para su uso posterior en el entrenamiento de modelos.")
+
+# Visualizar las primeras filas de los datos preparados
+print("\nPrimeras filas de X_train:")
+print(X_train.head())
+
+print("\nPrimeras filas de y_train:")
+print(y_train[:5])
+
+# Definir el modelo base
+dt = DecisionTreeClassifier(random_state=42)
+
+# Definir los parámetros para la búsqueda de cuadrícula
+param_grid = {
+    'max_depth': [3, 5, 7, 10],
+    'min_samples_split': [2, 5, 10],
+    'min_samples_leaf': [1, 2, 4],
+    'criterion': ['gini', 'entropy']
+}
+
+# Realizar la búsqueda de cuadrícula con validación cruzada optimizada
+grid_search = GridSearchCV(estimator=dt, param_grid=param_grid, cv=3, scoring='accuracy', n_jobs=-1)
+grid_search.fit(X_train, y_train)
+
+# Obtener el mejor modelo
+best_dt = grid_search.best_estimator_
+
+# Realizar predicciones en el conjunto de prueba
+y_pred = best_dt.predict(X_test)
+
+# Calcular métricas
+accuracy = accuracy_score(y_test, y_pred)
+precision = precision_score(y_test, y_pred, average='weighted')
+recall = recall_score(y_test, y_pred, average='weighted')
+f1 = f1_score(y_test, y_pred, average='weighted')
+
+print(f"Accuracy: {accuracy:.4f}")
+print(f"Precision: {precision:.4f}")
+print(f"Recall: {recall:.4f}")
+print(f"F1 Score: {f1:.4f}")
+
+# Matriz de confusión
+cm = confusion_matrix(y_test, y_pred)
+plt.figure(figsize=(10, 8))
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
+plt.title('Matriz de Confusión')
+plt.xlabel('Predicción')
+plt.ylabel('Valor Real')
+plt.show()
+
+# Curva ROC y AUC para problemas multiclase
+n_classes = len(np.unique(y))
+y_test_bin = label_binarize(y_test, classes=np.unique(y))
+y_score = best_dt.predict_proba(X_test)
+
+fpr = dict()
+tpr = dict()
+roc_auc = dict()
+
+for i in range(n_classes):
+    fpr[i], tpr[i], _ = roc_curve(y_test_bin[:, i], y_score[:, i])
+    roc_auc[i] = auc(fpr[i], tpr[i])
+
+# Calcular micro-average ROC curve and ROC area
+fpr["micro"], tpr["micro"], _ = roc_curve(y_test_bin.ravel(), y_score.ravel())
+roc_auc["micro"] = auc(fpr["micro"], tpr["micro"])
+
+# Plotear la curva ROC
+plt.figure(figsize=(10, 8))
+colors = cycle(['aqua', 'darkorange', 'cornflowerblue'])
+for i, color in zip(range(n_classes), colors):
+    plt.plot(fpr[i], tpr[i], color=color, lw=2,
+             label='ROC curve of class {0} (area = {1:0.2f})'
+             ''.format(i, roc_auc[i]))
+
+plt.plot([0, 1], [0, 1], 'k--', lw=2)
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('Tasa de Falsos Positivos')
+plt.ylabel('Tasa de Verdaderos Positivos')
+plt.title('Curva ROC para múltiples clases')
+plt.legend(loc="lower right")
+plt.show()
+
+# Imprimir el AUC promedio
+print(f"AUC promedio: {np.mean(list(roc_auc.values())):.4f}")
+
+# Importancia de las características
+importances = best_dt.feature_importances_
+feature_importance = pd.DataFrame({'feature': features, 'importance': importances})
+feature_importance = feature_importance.sort_values('importance', ascending=False)
+
+plt.figure(figsize=(10, 6))
+sns.barplot(x='importance', y='feature', data=feature_importance)
+plt.title('Importancia de las Características')
+plt.xlabel('Importancia')
+plt.ylabel('Característica')
+plt.show()
+
+# Guardar el modelo
+joblib.dump(best_dt, 'best_decision_tree_model.joblib')
+print("El mejor modelo de árbol de decisión ha sido guardado.")
+
+# Para la visualización del árbol de decisión:
+def visualize_tree(model, feature_names, class_names):
+    dot_data = export_graphviz(model, out_file=None,
+                               feature_names=feature_names,
+                               class_names=class_names,
+                               filled=True, rounded=True,
+                               special_characters=True)
+    graph = graphviz.Source(dot_data)
+    return graph
+
+# Crear la visualización
+graph = visualize_tree(best_dt, feature_names=features, class_names=best_dt.classes_.astype(str))
+
+# Guardar en formato PDF
+pdf_filename = "decision_tree.pdf"
+graph.render(pdf_filename, format="pdf", cleanup=True)
+print(f"El árbol de decisión se ha guardado como '{pdf_filename}' en tu directorio de trabajo actual.")
+print("Puedes abrir este archivo PDF para ver el árbol de decisión completo.")
+
+# Seleccionar algunas muestras aleatorias del conjunto de prueba
+n_samples = 10
+random_indices = np.random.choice(len(X_test), n_samples, replace=False)
+X_samples = X_test.iloc[random_indices]  # X_test es un DataFrame, así que usamos .iloc
+y_true = y_test[random_indices]  # y_test es un arreglo de NumPy, no usamos .iloc
+
+# Realizar predicciones
+y_pred = best_dt.predict(X_samples)
+y_pred_proba = best_dt.predict_proba(X_samples)
+
+# Obtener los nombres originales de las clases
+class_names = le_tipo.classes_
+
+# Mostrar las predicciones
+print("\nEjemplos de predicciones con el modelo de arbol de desicion:")
+print("---------------------------")
+for i in range(n_samples):
+    print(f"\nMuestra {i+1}:")
+    print(f"Características: {X_samples.iloc[i].values}")  # Usamos .iloc para obtener los valores como un arreglo
+    print(f"Clase verdadera: {class_names[y_true[i]]}")
+    print(f"Clase predicha: {class_names[y_pred[i]]}")
+    print("Probabilidades de cada clase:")
+    for j, prob in enumerate(y_pred_proba[i]):
+        print(f"  {class_names[j]}: {prob:.4f}")
+    print("---------------------------")
+
+# Calcular la precisión en estas muestras
+accuracy_samples = accuracy_score(y_true, y_pred)
+print(f"\nPrecisión en estas {n_samples} muestras: {accuracy_samples:.4f}")
+
+# Cargar los datos preprocesados
+X_train = np.load('X_train.npy', allow_pickle=True)
+X_test = np.load('X_test.npy', allow_pickle=True)
+y_train = np.load('y_train.npy', allow_pickle=True)
+y_test = np.load('y_test.npy', allow_pickle=True)
+
+# Cargar los transformadores
+le_volcan = joblib.load('le_volcan.joblib')
+le_tipo = joblib.load('le_tipo.joblib')
+
+# Definir el modelo base de Random Forest
+rf = RandomForestClassifier(random_state=42, warm_start=True)
+
+# Definir los parámetros para la búsqueda de cuadrícula
+param_grid = {
+    'n_estimators': [50, 100],  # Reducido para optimizar el tiempo
+    'max_depth': [10, 20, None],
+    'min_samples_split': [5, 10],
+    'min_samples_leaf': [1, 2],
+    'max_features': ['sqrt']  # Simplificado para evitar alta carga de cálculo
+}
+
+# Realizar la búsqueda de cuadrícula con validación cruzada
+grid_search = GridSearchCV(estimator=rf, param_grid=param_grid, cv=3, scoring='accuracy', n_jobs=-1, verbose=2)
+grid_search.fit(X_train, y_train)
+
+# Obtener el mejor modelo
+best_rf = grid_search.best_estimator_
+
+# Realizar predicciones en el conjunto de prueba
+y_pred = best_rf.predict(X_test)
+
+# Calcular métricas
+accuracy = accuracy_score(y_test, y_pred)
+precision = precision_score(y_test, y_pred, average='weighted')
+recall = recall_score(y_test, y_pred, average='weighted')
+f1 = f1_score(y_test, y_pred, average='weighted')
+
+print("Resultados del modelo Random Forest:")
+print(f"Accuracy: {accuracy:.4f}")
+print(f"Precision: {precision:.4f}")
+print(f"Recall: {recall:.4f}")
+print(f"F1 Score: {f1:.4f}")
+
+# Matriz de confusión
+cm = confusion_matrix(y_test, y_pred)
+plt.figure(figsize=(10, 8))
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
+plt.title('Matriz de Confusión - Random Forest')
+plt.xlabel('Predicción')
+plt.ylabel('Valor Real')
+plt.show()
+
+# Curva ROC y AUC para problemas multiclase
+n_classes = len(np.unique(y_test))
+y_score = best_rf.predict_proba(X_test)
+
+fpr = dict()
+tpr = dict()
+roc_auc = dict()
+
+for i in range(n_classes):
+    fpr[i], tpr[i], _ = roc_curve((y_test == i).astype(int), y_score[:, i])
+    roc_auc[i] = auc(fpr[i], tpr[i])
+
+# Plotear la curva ROC
+plt.figure(figsize=(10, 8))
+colors = cycle(['aqua', 'darkorange', 'cornflowerblue', 'green', 'red', 'purple'])
+for i, color in zip(range(n_classes), colors):
+    plt.plot(fpr[i], tpr[i], color=color, lw=2,
+             label=f'ROC curve of class {i} (area = {roc_auc[i]:0.2f})')
+
+plt.plot([0, 1], [0, 1], 'k--', lw=2)
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('Tasa de Falsos Positivos')
+plt.ylabel('Tasa de Verdaderos Positivos')
+plt.title('Curva ROC para múltiples clases - Random Forest')
+plt.legend(loc="lower right")
+plt.show()
+
+# Imprimir el AUC promedio
+print(f"AUC promedio: {np.mean(list(roc_auc.values())):.4f}")
+
+# Importancia de las características
+importances = best_rf.feature_importances_
+feature_names = ['AÑO', 'FRECUENCIA_PRINCIPAL', 'DURACION', 'ENERGIA', 'VOLCAN']
+feature_importance = pd.DataFrame({'feature': feature_names, 'importance': importances})
+feature_importance = feature_importance.sort_values('importance', ascending=False)
+
+plt.figure(figsize=(10, 6))
+sns.barplot(x='importance', y='feature', data=feature_importance)
+plt.title('Importancia de las Características - Random Forest')
+plt.xlabel('Importancia')
+plt.ylabel('Característica')
+plt.show()
+
+# Guardar el modelo
+joblib.dump(best_rf, 'best_random_forest_model.joblib')
+print("El mejor modelo de Random Forest ha sido guardado.")
+
+# Seleccionar algunas muestras aleatorias del conjunto de prueba
+n_samples = 10  # Número de muestras que deseas ver
+random_indices = np.random.choice(len(X_test), n_samples, replace=False)
+X_samples = X_test[random_indices]
+y_true = y_test[random_indices]
+
+# Realizar predicciones
+y_pred = best_rf.predict(X_samples)
+y_pred_proba = best_rf.predict_proba(X_samples)
+
+# Obtener los nombres originales de las clases
+class_names = le_tipo.classes_
+
+# Mostrar las predicciones
+print("\nEjemplos de predicciones del Random Forest:")
+print("---------------------------")
+for i in range(n_samples):
+    print(f"\nMuestra {i+1}:")
+    print(f"Características: {X_samples[i]}")
+    print(f"Clase verdadera: {class_names[y_true[i]]}")
+    print(f"Clase predicha: {class_names[y_pred[i]]}")
+    print("Probabilidades de cada clase:")
+    for j, prob in enumerate(y_pred_proba[i]):
+        print(f"  {class_names[j]}: {prob:.4f}")
+    print("---------------------------")
+
+# Calcular la precisión en estas muestras
+accuracy_samples = accuracy_score(y_true, y_pred)
+print(f"\nPrecisión en estas {n_samples} muestras: {accuracy_samples:.4f}")
+
+# Cargar los datos preprocesados
+X_train = np.load('X_train.npy', allow_pickle=True)
+X_test = np.load('X_test.npy', allow_pickle=True)
+y_train = np.load('y_train.npy', allow_pickle=True)
+y_test = np.load('y_test.npy', allow_pickle=True)
+
+# Tomar una muestra representativa de los datos de entrenamiento
+sample_size = 50000  # Ajusta este valor según tus necesidades
+X_train_sample = X_train[:sample_size]
+y_train_sample = y_train[:sample_size]
+
+# Crear pipeline optimizado
+pipeline = Pipeline([
+    ('scaler', StandardScaler()),
+    ('svm', SVC(kernel='rbf', probability=True, random_state=42))
+])
+
+# Definir espacio de búsqueda para los hiperparámetros
+param_distributions = {
+    'svm__C': loguniform(1e-2, 1e2),
+    'svm__gamma': loguniform(1e-3, 1e0)
+}
+
+# Realizar búsqueda aleatoria con parámetros optimizados
+random_search = RandomizedSearchCV(
+    pipeline, param_distributions, n_iter=10, cv=3, n_jobs=-1, verbose=1, random_state=42
+)
+random_search.fit(X_train_sample, y_train_sample)
+
+# Obtener el mejor modelo
+best_svm = random_search.best_estimator_
+
+# Guardar el modelo
+joblib.dump(best_svm, 'best_svm_model.joblib')
+print("El mejor modelo de SVM ha sido guardado.")
+
+# Evaluar el modelo
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore", UndefinedMetricWarning)
+    y_pred = best_svm.predict(X_test)
+    accuracy = accuracy_score(y_test, y_pred)
+    precision = precision_score(y_test, y_pred, average='weighted')
+    recall = recall_score(y_test, y_pred, average='weighted')
+    f1 = f1_score(y_test, y_pred, average='weighted')
+
+print("Resultados del modelo SVM:")
+print(f"Accuracy: {accuracy:.4f}")
+print(f"Precision: {precision:.4f}")
+print(f"Recall: {recall:.4f}")
+print(f"F1 Score: {f1:.4f}")
+
+# Matriz de confusión
+cm = confusion_matrix(y_test, y_pred)
+plt.figure(figsize=(10, 8))
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
+plt.title('Matriz de Confusión - SVM')
+plt.xlabel('Predicción')
+plt.ylabel('Valor Real')
+plt.show()
+
+# Curva ROC
+y_score = best_svm.predict_proba(X_test)
+n_classes = len(np.unique(y_test))
+fpr = dict()
+tpr = dict()
+roc_auc = dict()
+
+for i in range(n_classes):
+    fpr[i], tpr[i], _ = roc_curve((y_test == i).astype(int), y_score[:, i])
+    roc_auc[i] = auc(fpr[i], tpr[i])
+
+plt.figure(figsize=(10, 8))
+colors = cycle(['aqua', 'darkorange', 'cornflowerblue', 'green', 'red', 'purple'])
+for i, color in zip(range(n_classes), colors):
+    plt.plot(fpr[i], tpr[i], color=color, lw=2,
+             label=f'ROC curve of class {i} (area = {roc_auc[i]:0.2f})')
+
+plt.plot([0, 1], [0, 1], 'k--', lw=2)
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('Tasa de Falsos Positivos')
+plt.ylabel('Tasa de Verdaderos Positivos')
+plt.title('Curva ROC para múltiples clases - SVM')
+plt.legend(loc="lower right")
+plt.show()
+
+print(f"AUC promedio: {np.mean(list(roc_auc.values())):.4f}")
+
+# Obtener el modelo SVM del pipeline
+svm_model = best_svm.named_steps['svm']
+
+# Obtener los vectores de soporte
+support_vectors = svm_model.support_vectors_
+
+# Seleccionar las 3 características principales para la visualización
+X_3d = X[['FRECUENCIA_PRINCIPAL', 'DURACION', 'ENERGIA']]
+
+# Crear el gráfico de dispersión 3D
+fig = plt.figure(figsize=(12, 10))
+ax = fig.add_subplot(111, projection='3d')
+
+# Graficar los vectores de soporte
+ax.scatter(support_vectors[:, 0], support_vectors[:, 1], support_vectors[:, 2], c='r', s=100, label='Vectores de Soporte')
+
+# Graficar el resto de los datos
+ax.scatter(X_3d.values[:, 0], X_3d.values[:, 1], X_3d.values[:, 2], c=y, cmap='viridis', s=50, alpha=0.5, label='Datos')
+
+# Ajustar la escala de los ejes
+ax.set_xlim3d(0, 45)
+ax.set_ylim3d(0, 12000)
+ax.set_zlim3d(0, 1000)
+
+# Agregar etiquetas y título
+ax.set_xlabel('Frecuencia Principal')
+ax.set_ylabel('Duración')
+ax.set_zlabel('Energía')
+ax.set_title('Gráfico 3D de Vectores de Soporte SVM')
+ax.legend()
+
+plt.show()
+
+# Seleccionar algunas muestras aleatorias del conjunto de datos original
+n_samples = 10
+random_indices = np.random.choice(len(X), n_samples, replace=False)
+X_samples = X.iloc[random_indices]
+y_true = y[random_indices]
+
+# Realizar predicciones
+y_pred = best_svm.predict(X_samples)
+y_pred_proba = best_svm.predict_proba(X_samples)
+
+# Obtener los nombres originales de las clases
+class_names = le_tipo.classes_
+
+# Mostrar las predicciones
+print("\nEjemplos de predicciones del modelo SVM:")
+print("---------------------------")
+for i in range(n_samples):
+    print(f"\nMuestra {i+1}:")
+    print(f"Características: {X_samples.iloc[i].values}")
+    print(f"Clase verdadera: {class_names[y_true[i]]}")
+    print(f"Clase predicha: {class_names[y_pred[i]]}")
+    print("Probabilidades de cada clase:")
+    for j, prob in enumerate(y_pred_proba[i]):
+        print(f"  {class_names[j]}: {prob:.4f}")
+    print("---------------------------")
+
+# Calcular la precisión en estas muestras
+accuracy_samples = accuracy_score(y_true, y_pred)
+print(f"\nPrecisión en estas {n_samples} muestras: {accuracy_samples:.4f}")
+
+# Transformador personalizado para manejar valores negativos
+class NegativeHandler(BaseEstimator, TransformerMixin):
+    def __init__(self, offset=0):
+        self.offset = offset
+    def fit(self, X, y=None):
+        return self
+    def transform(self, X):
+        return X - X.min(axis=0) + self.offset
+
+# Cargar los datos
+X_train = np.load('X_train.npy', allow_pickle=True)
+X_test = np.load('X_test.npy', allow_pickle=True)
+y_train = np.load('y_train.npy', allow_pickle=True)
+y_test = np.load('y_test.npy', allow_pickle=True)
+
+# Verificar si hay valores negativos
+print("Valores negativos en X_train:", np.any(X_train < 0))
+print("Valores negativos en X_test:", np.any(X_test < 0))
+
+# Tomar una muestra representativa más grande
+sample_size = min(100000, len(X_train))
+indices = np.random.choice(len(X_train), sample_size, replace=False)
+X_train_sample = X_train[indices]
+y_train_sample = y_train[indices]
+
+# Definir el pipeline
+pipeline = Pipeline([
+    ('imputer', SimpleImputer(strategy='median')),
+    ('feature_selection', SelectFromModel(RandomForestClassifier(n_estimators=100, random_state=42))),
+    ('preprocessor', ColumnTransformer([('passthrough', 'passthrough', slice(0, None))])),
+    ('nb', GaussianNB())
+])
+
+# Definir el espacio de búsqueda de parámetros
+param_distributions = [
+    {
+        'feature_selection': [SelectFromModel(RandomForestClassifier(random_state=42)), 
+                              RFE(estimator=RandomForestClassifier(random_state=42), n_features_to_select=None)],
+        'feature_selection__estimator__n_estimators': [50, 100, 200, 300],
+        'feature_selection__estimator__max_depth': [None, 5, 10, 15],
+        'preprocessor': [
+            ColumnTransformer([('scaler', StandardScaler(), slice(0, None))]),
+            ColumnTransformer([('scaler', MinMaxScaler(), slice(0, None))]),
+            ColumnTransformer([('scaler', PowerTransformer(method='yeo-johnson'), slice(0, None))])
+        ],
+        'nb': [GaussianNB()],
+        'nb__var_smoothing': [1e-10, 1e-9, 1e-8, 1e-7, 1e-6]
+    },
+    {
+        'feature_selection': [SelectFromModel(RandomForestClassifier(random_state=42)), 
+                              RFE(estimator=RandomForestClassifier(random_state=42), n_features_to_select=None)],
+        'feature_selection__estimator__n_estimators': [50, 100, 200, 300],
+        'feature_selection__estimator__max_depth': [None, 5, 10, 15],
+        'preprocessor': [ColumnTransformer([
+            ('negative_handler', NegativeHandler(offset=1), slice(0, None)),
+            ('scaler', MinMaxScaler(), slice(0, None))
+        ])],
+        'nb': [MultinomialNB(), ComplementNB()],
+        'nb__alpha': [0.01, 0.1, 0.5, 1.0, 2.0]
+    },
+    {
+        'feature_selection': [SelectFromModel(RandomForestClassifier(random_state=42)), 
+                              RFE(estimator=RandomForestClassifier(random_state=42), n_features_to_select=None)],
+        'feature_selection__estimator__n_estimators': [50, 100, 200, 300],
+        'feature_selection__estimator__max_depth': [None, 5, 10, 15],
+        'preprocessor': [ColumnTransformer([('scaler', MinMaxScaler(), slice(0, None))])],
+        'nb': [BernoulliNB()],
+        'nb__alpha': [0.01, 0.1, 0.5, 1.0, 2.0],
+        'nb__binarize': [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]
+    }
+]
+
+# Configurar y ejecutar RandomizedSearchCV
+skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+random_search = RandomizedSearchCV(pipeline, param_distributions, n_iter=100, cv=skf, 
+                                   scoring='f1_weighted', n_jobs=-1, random_state=42,
+                                   error_score='raise', verbose=2)
+random_search.fit(X_train_sample, y_train_sample)
+
+# Obtener el mejor modelo
+best_model = random_search.best_estimator_
+
+# Hacer predicciones en el conjunto de prueba
+y_pred = best_model.predict(X_test)
+y_pred_proba = best_model.predict_proba(X_test)
+
+# Calcular métricas
+accuracy = accuracy_score(y_test, y_pred)
+precision = precision_score(y_test, y_pred, average='weighted', zero_division=1)
+recall = recall_score(y_test, y_pred, average='weighted')
+f1 = f1_score(y_test, y_pred, average='weighted')
+
+print("\nResultados del modelo Naive Bayes optimizado:")
+print(f"Accuracy: {accuracy:.4f}")
+print(f"Precision: {precision:.4f}")
+print(f"Recall: {recall:.4f}")
+print(f"F1 Score: {f1:.4f}")
+
+# Calcular AUC-ROC
+n_classes = len(np.unique(y_test))
+auc_roc = roc_auc_score(y_test, y_pred_proba, multi_class='ovr', average='weighted')
+print(f"AUC-ROC: {auc_roc:.4f}")
+
+print("\nMejores parámetros encontrados:")
+print(random_search.best_params_)
+
+# Matriz de confusión
+cm = confusion_matrix(y_test, y_pred)
+plt.figure(figsize=(10, 8))
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
+plt.title('Matriz de Confusión - Naive Bayes Optimizado')
+plt.xlabel('Predicción')
+plt.ylabel('Valor Real')
+plt.show()
+
+# Curva ROC
+plt.figure(figsize=(10, 8))
+for i in range(n_classes):
+    fpr, tpr, _ = roc_curve(y_test == i, y_pred_proba[:, i])
+    roc_auc = auc(fpr, tpr)
+    plt.plot(fpr, tpr, lw=2, label=f'ROC curve (class {i}) (area = {roc_auc:.2f})')
+
+plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('Tasa de Falsos Positivos')
+plt.ylabel('Tasa de Verdaderos Positivos')
+plt.title('Curva ROC - Naive Bayes Optimizado')
+plt.legend(loc="lower right")
+plt.show()
+
+# Guardar el mejor modelo
+joblib.dump(best_model, 'best_naive_bayes_model.joblib')
+print("\nEl mejor modelo ha sido guardado como 'best_naive_bayes_model.joblib'")
+
+# Seleccionar algunas muestras aleatorias del conjunto de datos original
+n_samples = 10
+random_indices = np.random.choice(len(X_test), n_samples, replace=False)
+X_samples = X_test[random_indices]
+y_true = y_test[random_indices]
+
+# Realizar predicciones
+y_pred = best_model.predict(X_samples)
+y_pred_proba = best_model.predict_proba(X_samples)
+
+# Obtener los nombres originales de las clases
+class_names = le_tipo.classes_
+
+# Mostrar las predicciones
+print("\nEjemplos de predicciones del modelo Naive Bayes optimizado:")
+print("---------------------------")
+for i in range(n_samples):
+    print(f"\nMuestra {i+1}:")
+    print(f"Características: {X_samples[i]}")
+    print(f"Clase verdadera: {class_names[y_true[i]]}")
+    print(f"Clase predicha: {class_names[y_pred[i]]}")
+    print("Probabilidades de cada clase:")
+    for j, prob in enumerate(y_pred_proba[i]):
+        print(f"  {class_names[j]}: {prob:.4f}")
+    print("---------------------------")
+
+# Calcular la precisión en estas muestras
+accuracy_samples = accuracy_score(y_true, y_pred)
+print(f"\nPrecisión en estas {n_samples} muestras: {accuracy_samples:.4f}")
+
+# Cargar los datos preprocesados
+X_train = np.load('X_train.npy', allow_pickle=True)
+X_test = np.load('X_test.npy', allow_pickle=True)
+y_train = np.load('y_train.npy', allow_pickle=True)
+y_test = np.load('y_test.npy', allow_pickle=True)
+
+# Cargar los transformadores
+le_tipo = joblib.load('le_tipo.joblib')
+
+# Tomar una muestra representativa de los datos de entrenamiento
+sample_size = 50000  # Ajustar este valor según las necesidades
+X_train_sample = X_train[:sample_size]
+y_train_sample = y_train[:sample_size]
+
+# Crear pipeline
+pipeline = Pipeline([
+    ('scaler', StandardScaler()),
+    ('feature_selection', SelectKBest(f_classif, k='all')),
+    ('ann', MLPClassifier(random_state=42))
+])
+
+# Definir parámetros para la búsqueda aleatoria
+param_distributions = {
+    'ann__hidden_layer_sizes': [(50,), (100,), (50, 50), (100, 100)],
+    'ann__activation': ['relu', 'tanh'],
+    'ann__solver': ['adam', 'sgd'],
+    'ann__alpha': [0.0001, 0.001, 0.01],
+    'ann__learning_rate': ['constant', 'adaptive'],
+    'ann__max_iter': [200, 500]
+}
+
+# Realizar búsqueda aleatoria
+random_search = RandomizedSearchCV(
+    pipeline, param_distributions, n_iter=10, cv=2, n_jobs=4, verbose=1, random_state=42
+)
+random_search.fit(X_train_sample, y_train_sample)
+
+# Obtener el mejor modelo
+best_ann = random_search.best_estimator_
+
+# Guardar el modelo
+joblib.dump(best_ann, 'best_ann_model.joblib')
+print("El mejor modelo de ANN ha sido guardado.")
+
+# Evaluar el modelo
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore", UndefinedMetricWarning)
+    y_pred = best_ann.predict(X_test)
+    accuracy = accuracy_score(y_test, y_pred)
+    precision = precision_score(y_test, y_pred, average='weighted', zero_division=1)
+    recall = recall_score(y_test, y_pred, average='weighted')
+    f1 = f1_score(y_test, y_pred, average='weighted')
+
+print("Resultados del modelo ANN:")
+print(f"Accuracy: {accuracy:.4f}")
+print(f"Precision: {precision:.4f}")
+print(f"Recall: {recall:.4f}")
+print(f"F1 Score: {f1:.4f}")
+
+# Matriz de confusión
+cm = confusion_matrix(y_test, y_pred)
+plt.figure(figsize=(10, 8))
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
+plt.title('Matriz de Confusión - ANN')
+plt.xlabel('Predicción')
+plt.ylabel('Valor Real')
+plt.show()
+
+# Curva ROC
+y_score = best_ann.predict_proba(X_test)
+n_classes = len(np.unique(y_test))
+fpr = dict()
+tpr = dict()
+roc_auc = dict()
+for i in range(n_classes):
+    fpr[i], tpr[i], _ = roc_curve((y_test == i).astype(int), y_score[:, i])
+    roc_auc[i] = auc(fpr[i], tpr[i])
+
+plt.figure(figsize=(10, 8))
+colors = cycle(['aqua', 'darkorange', 'cornflowerblue', 'green', 'red', 'purple'])
+for i, color in zip(range(n_classes), colors):
+    plt.plot(fpr[i], tpr[i], color=color, lw=2,
+             label=f'ROC curve of class {i} (area = {roc_auc[i]:0.2f})')
+plt.plot([0, 1], [0, 1], 'k--', lw=2)
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('Tasa de Falsos Positivos')
+plt.ylabel('Tasa de Verdaderos Positivos')
+plt.title('Curva ROC para múltiples clases - ANN')
+plt.legend(loc="lower right")
+plt.show()
+
+print(f"AUC promedio: {np.mean(list(roc_auc.values())):.4f}")
+
+# Seleccionar algunas muestras aleatorias del conjunto de prueba
+n_samples = 10
+random_indices = np.random.choice(len(X_test), n_samples, replace=False)
+X_samples = X_test[random_indices]
+y_true = y_test[random_indices]
+
+# Realizar predicciones
+y_pred = best_ann.predict(X_samples)
+y_pred_proba = best_ann.predict_proba(X_samples)
+
+# Obtener los nombres originales de las clases
+class_names = le_tipo.classes_
+
+# Mostrar las predicciones
+print("\nEjemplos de predicciones con el modelo de ANN:")
+print("---------------------------")
+for i in range(n_samples):
+    print(f"\nMuestra {i+1}:")
+    print(f"Características: {X_samples[i]}")
+    print(f"Clase verdadera: {class_names[y_true[i]]}")
+    print(f"Clase predicha: {class_names[y_pred[i]]}")
+    print("Probabilidades de cada clase:")
+    for j, prob in enumerate(y_pred_proba[i]):
+        print(f"  {class_names[j]}: {prob:.4f}")
+    print("---------------------------")
+
+# Calcular la precisión en estas muestras
+accuracy_samples = accuracy_score(y_true, y_pred)
+print(f"\nPrecisión en estas {n_samples} muestras: {accuracy_samples:.4f}")
+
+# Cargar los datos preprocesados
+X_train = np.load('X_train.npy', allow_pickle=True)
+X_test = np.load('X_test.npy', allow_pickle=True)
+y_train = np.load('y_train.npy', allow_pickle=True)
+y_test = np.load('y_test.npy', allow_pickle=True)
+
+# Cargar los transformadores
+le_volcan = joblib.load('le_volcan.joblib')
+le_tipo = joblib.load('le_tipo.joblib')
+
+# Crear pipeline
+pipeline = Pipeline([
+    ('scaler', StandardScaler()),
+    ('log_reg', LogisticRegression(solver='lbfgs', multi_class='multinomial', random_state=42, max_iter=1000))
+])
+
+# Definir parámetros para GridSearch
+param_grid = {
+    'log_reg__C': np.logspace(-4, 4, 20),
+    'log_reg__penalty': ['l2']  # 'l1' no está soportado con el solver 'lbfgs'
+}
+
+# Realizar búsqueda de hiperparámetros
+grid_search = GridSearchCV(pipeline, param_grid, cv=3, scoring='accuracy', n_jobs=-1)
+grid_search.fit(X_train, y_train)
+
+# Obtener el mejor modelo
+best_model = grid_search.best_estimator_
+
+# Evaluación del modelo en los datos de prueba
+y_pred = best_model.predict(X_test)
+y_prob = best_model.predict_proba(X_test)
+
+# Mostrar métricas de evaluación
+print("Mejores Hiperparámetros:", grid_search.best_params_)
+print("\nReporte de Clasificación:\n", classification_report(y_test, y_pred, zero_division=1))
+
+print("\nMatriz de Confusión:\n")
+cm = confusion_matrix(y_test, y_pred)
+plt.figure(figsize=(10, 8))
+plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
+plt.title('Matriz de Confusión - Regresión Logística Multinomial')
+plt.colorbar()
+tick_marks = np.arange(len(le_tipo.classes_))
+plt.xticks(tick_marks, le_tipo.classes_, rotation=45)
+plt.yticks(tick_marks, le_tipo.classes_)
+fmt = 'd'
+thresh = cm.max() / 2.
+for i, j in enumerate(range(cm.shape[0])):
+    for k, l in enumerate(range(cm.shape[1])):
+        plt.text(l, i, format(cm[i, l], fmt),
+                 horizontalalignment="center",
+                 color="white" if cm[i, l] > thresh else "black")
+plt.ylabel('Valor Real')
+plt.xlabel('Predicción')
+plt.show()
+
+# Calcular y mostrar las métricas
+accuracy = accuracy_score(y_test, y_pred)
+f1_macro = f1_score(y_test, y_pred, average='macro', zero_division=1)
+precision_macro = precision_score(y_test, y_pred, average='macro', zero_division=1)
+recall_macro = recall_score(y_test, y_pred, average='macro', zero_division=1)
+
+print(f"\nExactitud: {accuracy:.4f}")
+print(f"F1 Score (macro): {f1_macro:.4f}") 
+print(f"Precisión (macro): {precision_macro:.4f}")
+print(f"Recall (macro): {recall_macro:.4f}")
+
+# Curva ROC para clasificación multiclase
+n_classes = len(np.unique(y_test))
+y_test_bin = label_binarize(y_test, classes=np.unique(y_test))
+
+fpr = dict()
+tpr = dict()
+roc_auc = dict()
+
+for i in range(n_classes):
+    fpr[i], tpr[i], _ = roc_curve(y_test_bin[:, i], y_prob[:, i])
+    roc_auc[i] = auc(fpr[i], tpr[i])
+
+# Calcular micro-average ROC curve y ROC area
+fpr["micro"], tpr["micro"], _ = roc_curve(y_test_bin.ravel(), y_prob.ravel())
+roc_auc["micro"] = auc(fpr["micro"], tpr["micro"])
+
+# Graficar la curva ROC
+plt.figure(figsize=(10, 8))
+plt.plot(fpr["micro"], tpr["micro"],
+         label='micro-average ROC curve (area = {0:0.2f})'
+               ''.format(roc_auc["micro"]),
+         color='deeppink', linestyle=':', linewidth=4)
+
+colors = cycle(['aqua', 'darkorange', 'cornflowerblue', 'red', 'green', 'yellow', 'purple', 'pink', 'gray'])
+for i, color in zip(range(n_classes), colors):
+    plt.plot(fpr[i], tpr[i], color=color, lw=2,
+             label='ROC curve of class {0} (area = {1:0.2f})'
+             ''.format(le_tipo.classes_[i], roc_auc[i]))
+
+plt.plot([0, 1], [0, 1], 'k--', lw=2)
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('Receiver Operating Characteristic (ROC) Curve')
+plt.legend(loc="lower right")
+plt.show()
+
+# Guardar el mejor modelo
+joblib.dump(best_model, 'best_log_reg_model_multinomial.joblib')
+print("El mejor modelo de regresión logística multinomial ha sido guardado.")
+
+# Seleccionar algunas muestras aleatorias del conjunto de prueba
+n_samples = 10
+random_indices = np.random.choice(len(X_test), n_samples, replace=False)
+X_samples = X_test[random_indices]  
+y_true = y_test[random_indices]  
+
+# Realizar predicciones
+y_pred = best_model.predict(X_samples)
+y_pred_proba = best_model.predict_proba(X_samples)
+
+# Obtener los nombres originales de las clases
+class_names = le_tipo.inverse_transform(np.unique(y_test))
+
+# Mostrar las predicciones
+print("\nEjemplos de predicciones con el modelo de regresión logística multinomial:")
+print("---------------------------")
+for i in range(n_samples):
+    print(f"\nMuestra {i+1}:")
+    print(f"Características: {X_samples[i]}")  
+    print(f"Clase verdadera: {class_names[y_true[i]]}")
+    print(f"Clase predicha: {class_names[y_pred[i]]}")
+    print("Probabilidades de cada clase:")
+    for j, prob in enumerate(y_pred_proba[i]):
+        print(f"  {class_names[j]}: {prob:.4f}")
+    print("---------------------------")
+
+# Calcular la precisión en estas muestras
+accuracy_samples = accuracy_score(y_true, y_pred)
+print(f"\nPrecisión en estas {n_samples} muestras: {accuracy_samples:.4f}")
+
+# Cargar los modelos entrenados
+best_dt = joblib.load('best_decision_tree_model.joblib')
+best_rf = joblib.load('best_random_forest_model.joblib')
+best_svm = joblib.load('best_svm_model.joblib')
+best_nb = joblib.load('best_naive_bayes_model.joblib')
+best_ann = joblib.load('best_ann_model.joblib')
+best_log_reg = joblib.load('best_log_reg_model_multinomial.joblib')
+
+# Cargar los datos de prueba
+X_test = np.load('X_test.npy', allow_pickle=True)
+y_test = np.load('y_test.npy', allow_pickle=True)
+
+feature_names = ['AÑO', 'FRECUENCIA_PRINCIPAL', 'DURACION', 'ENERGIA', 'VOLCAN']
+
+# Crear una función para evaluar cada modelo y devolver las métricas
+def evaluate_model(model, X_test, y_test):
+    y_pred = model.predict(X_test)
+    accuracy = accuracy_score(y_test, y_pred)
+    precision = precision_score(y_test, y_pred, average='weighted', zero_division=1)
+    recall = recall_score(y_test, y_pred, average='weighted')
+    f1 = f1_score(y_test, y_pred, average='weighted')
+    return accuracy, precision, recall, f1
+
+# Evaluar cada modelo y almacenar las métricas en un DataFrame
+models = [
+    ('Decision Tree', best_dt),
+    ('Random Forest', best_rf),
+    ('SVM', best_svm),
+    ('Naive Bayes', best_nb),
+    ('ANN', best_ann),
+    ('Logistic Regression', best_log_reg)
+]
+
+results = []
+for name, model in models:
+    accuracy, precision, recall, f1 = evaluate_model(model, X_test, y_test)
+    results.append([name, accuracy, precision, recall, f1])
+
+df_results = pd.DataFrame(results, columns=['Model', 'Accuracy', 'Precision', 'Recall', 'F1 Score'])
+
+# Visualizar los resultados en una tabla
+print("Comparación de modelos:")
+print(df_results)
+
+# Gráfico de barras para comparar visualmente las métricas
+plt.figure(figsize=(12, 6))
+metrics = ['Accuracy', 'Precision', 'Recall', 'F1 Score']
+x = np.arange(len(metrics))
+width = 0.15
+
+for i, (name, _) in enumerate(models):
+    plt.bar(x + i * width, df_results.iloc[i, 1:], width, label=name)
+
+plt.xlabel('Métricas')
+plt.ylabel('Valor')
+plt.title('Comparación de modelos')
+plt.xticks(x + width * (len(models) - 1) / 2, metrics)
+plt.legend(loc='best')
+plt.tight_layout()
+plt.show()
+
+# Determinar el mejor modelo basado en las métricas
+best_model_idx = df_results['F1 Score'].idxmax()
+best_model_name = df_results.loc[best_model_idx, 'Model']
+print(f"\nEl mejor modelo basado en F1 Score es: {best_model_name}")
+
